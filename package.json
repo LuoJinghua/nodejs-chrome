@@ -1,0 +1,19 @@
+{
+	"name": "nodejs-chrome",
+	"version": "1.0.0",
+	"description": "",
+	"main": "module.js",
+	"scripts": {
+		"preinstall": "node install.js"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/alex2844/nodejs-chrome.git"
+	},
+	"author": {
+		"name": "Alex Smith",
+		"email": "alex.smith2844@gmail.com",
+		"website": "https://me.qwedl.com/",
+		"github": "https://github.com/alex2844"
+	}
+}
