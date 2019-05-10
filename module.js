@@ -66,6 +66,8 @@ module.exports = (async (opt={}) => {
 				`],
 			}]))),
 			exit: () => {
+				if (proxy)
+					proxy.close();
 				if (browser._process)
 					return page.close();
 				else
