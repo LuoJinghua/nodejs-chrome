@@ -24,7 +24,7 @@ module.exports = (async (opt={}) => {
 	if (module.exports.Proxy && ('Server' in module.exports.Proxy)) {
 		(proxy = new module.exports.Proxy.Server({
 			port: (module.exports.Proxy.port || (await (new Promise((resolve, reject) => {
-				var server = require('net').createServer().on('error', reject).unref().listen(port => ((port = server.address().port) && server.close(() => resolve(port))));
+				var server = net.createServer().on('error', reject).unref().listen(port => ((port = server.address().port) && server.close(() => resolve(port))));
 			})))),
 			prepareRequestFunction: ({
 				request, username, password, hostname, port, isHttp, connectionId
