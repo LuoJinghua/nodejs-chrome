@@ -51,8 +51,8 @@ module.exports = (async (opt={}) => {
 		proxy: proxy,
 		ws: ws,
 		browser: browser,
-		tabnew: async () => (page = Object.assign((await browser.newPage()), {
-			setUrl: url => page.goto(url),
+		tabnew: async page => (page = Object.assign((await browser.newPage()), {
+			setUrl: (url, opt={}) => page.goto(url, opt),
 			setProxy: (module.exports.Proxy ? proxy => page.setExtraHTTPHeaders({
 				proxy: proxy
 			}) : null),
@@ -65,15 +65,20 @@ module.exports = (async (opt={}) => {
 					return obj;
 				`],
 			}]))),
-			exit: () => {
-				if (proxy)
-					proxy.close();
+			exit: () => page.close({
+				runBeforeUnload: true
+			})
+			/* exit: () => {
 				if (browser._process)
 					return page.close();
 				else
 					return new Promise((resolve, reject) => page.close(browser.on('targetdestroyed', () => resolve())));
-			}
+			} */
 		})),
-		exit: async () => browser[(browser._process ? 'close' : 'disconnect')]()
+		exit: () => {
+			if (proxy)
+				proxy.close();
+			return browser[(browser._process ? 'close' : 'disconnect')]();
+		}
 	}));
 });
