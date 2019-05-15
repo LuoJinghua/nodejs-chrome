@@ -23,13 +23,13 @@ module.exports = (async (opt={}) => {
 	}
 	if (module.exports.Proxy && ('Server' in module.exports.Proxy)) {
 		(proxy = new module.exports.Proxy.Server({
-			port: (module.exports.Proxy.port || (await (new Promise((resolve, reject) => {
+			port: ((chronos ? 8000 : module.exports.Proxy.port) || (await (new Promise((resolve, reject) => {
 				var server = net.createServer().on('error', reject).unref().listen(port => ((port = server.address().port) && server.close(() => resolve(port))));
 			})))),
 			prepareRequestFunction: ({
 				request, username, password, hostname, port, isHttp, connectionId
 			}) => ((request.headers && request.headers.proxy) ? {
-				upstreamProxyUrl: request.headers.proxy
+				upstreamProxyUrl: ((request.headers.proxy.indexOf('://') == -1) ? 'http://' : '')+request.headers.proxy
 			} : null)
 		})).listen(() => console.log('Proxy server is listening on port '+proxy.port));
 		opt.args = (opt.args || []).concat(['--proxy-server=http://127.0.0.1:'+proxy.port]);
