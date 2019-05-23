@@ -18,6 +18,7 @@ module.exports = (async (opt={}) => {
 			lambda = (process.argv[1].match('awslambda') && require('chrome-aws-lambda')),
 			chronos = ((process.env.SUDO_USER || process.env.USER) == 'chronos'),
 			puppeteer = ((chronos || lambda) ? require('puppeteer-core') : require('puppeteer'));
+			puppeteer = require(process.cwd()+'/node_modules/nodejs-chrome/node_modules/'+((chronos || lambda) ? 'puppeteer-core' : 'puppeteer'));
 	} catch (e) {
 		process.exit(console.error('Error: npm install'));
 	}
