@@ -1,4 +1,5 @@
 /*
+// EXAMPLE 1
 chrome.Proxy = require('proxy-chain');
 chrome.Proxy.port = '8000';
 await (tab = await (browser = await require('nodejs-chrome')()).tabnew());
@@ -9,16 +10,24 @@ console.log(await tab.eval(_ => {
 }));
 await tab.exit();
 await browser.exit();
+// EXAMPLE 2
+require('nodejs-chrome')().then(browser => {
+	browser.tabnew().then(tab => {
+		tab.setUrl('http://ifconfig.io/ip').then(res => res.text()).then(text => {
+			tab.exit().then(() => browser.exit().then(() => console.log(text.trim())));
+		});
+	});
+});
 */
 module.exports = (async (opt={}) => {
 	try {
 		var proxy, ws, browser,
 			net = require('net'),
 			http = require('http'),
+			exec = require('child_process').exec,
 			lambda = (process.argv[1].match('awslambda') && require('chrome-aws-lambda')),
 			chronos = ((process.env.SUDO_USER || process.env.USER) == 'chronos'),
-			puppeteer = ((chronos || lambda) ? require('puppeteer-core') : require('puppeteer'));
-			puppeteer = require(process.cwd()+'/node_modules/nodejs-chrome/node_modules/'+((chronos || lambda) ? 'puppeteer-core' : 'puppeteer'));
+			puppeteer = require(module.path+'/node_modules/'+(((process.arch != "x64") || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'));
 	} catch (e) {
 		process.exit(console.error('Error: npm install'));
 	}
@@ -47,7 +56,9 @@ module.exports = (async (opt={}) => {
 		args: lambda.args.concat((opt.args || [])),
 		executablePath: await lambda.executablePath,
 		headless: lambda.headless
-	} : {}), opt)))), {
+	} : ((process.arch != "x64") ? {
+		executablePath: await new Promise((resolve, reject) => exec('which chromium-browser chromium', (err, data) => resolve(data.trim())))
+	} : {})), opt)))), {
 		Proxy: module.exports.Proxy,
 		proxy: proxy,
 		ws: ws,
