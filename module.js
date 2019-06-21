@@ -27,7 +27,8 @@ module.exports = (async (opt={}) => {
 			exec = require('child_process').exec,
 			lambda = (process.argv[1].match('awslambda') && require('chrome-aws-lambda')),
 			chronos = ((process.env.SUDO_USER || process.env.USER) == 'chronos'),
-			puppeteer = require(module.path+'/node_modules/'+(((process.arch != "x64") || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'));
+			pt = (((process.arch != "x64") || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'),
+			puppeteer = require(module.path+'/node_modules/'+pt);
 	} catch (e) {
 		process.exit(console.error('Error: npm install'));
 	}
@@ -59,15 +60,67 @@ module.exports = (async (opt={}) => {
 	} : ((process.arch != "x64") ? {
 		executablePath: await new Promise((resolve, reject) => exec('which chromium-browser chromium', (err, data) => resolve(data.trim())))
 	} : {})), opt)))), {
+		parent: {
+			name: pt,
+			module: puppeteer
+		},
 		Proxy: module.exports.Proxy,
 		proxy: proxy,
 		ws: ws,
 		browser: browser,
+		pointer: page_ => page_.evaluateOnNewDocument(() => ((window === window.parent) && window.addEventListener('DOMContentLoaded', () => {
+			(Object.assign(class extends HTMLElement {
+				constructor(...args) {
+					super(...args);
+					this.dom = this.attachShadow({mode: 'open'});
+					this.dom.appendChild(this.css = document.createElement('style'));
+					this.dom.appendChild(this.pointer = document.createElement('pointer'));
+					this.css.innerHTML = `
+						pointer {
+							pointer-events: none; position: absolute; top: 0; z-index: 10000;
+							left: 0; width: 20px; height: 20px; background: rgba(0, 0, 0, .4);
+							border: 1px solid white; border-radius: 10px; margin: -10px 0 0 -10px;
+							padding: 0; transition: background .2s, border-radius .2s, border-color .2s;
+						}
+						pointer[class*=mouse], pointer[class*=touch] { transition: none; }
+						pointer.mouse-0 { background: rgba(0, 0, 0, 0.9); }
+						pointer.touch-0 { background: rgba(255, 255, 255, 0.9); }
+						pointer.mouse-1, pointer.touch-1 { border-color: rgba(0, 0, 255, 0.9); }
+						pointer.mouse-2, pointer.touch-2 { border-radius: 4px; }
+						pointer.mouse-3, pointer.touch-3 { border-color: rgba(255, 0, 0, 0.9); }
+						pointer.mouse-4, pointer.touch-4 { border-color: rgba(0, 255, 0, 0.9); }
+					`;
+					document.addEventListener('pointermove', event => this.move(event));
+					document.addEventListener('pointerdown', event => this.pointer.classList.add(event.pointerType+'-'+event.which, this.click(this.move(event))));
+					document.addEventListener('pointerup', event => this.pointer.classList.remove(event.pointerType+'-'+event.which, this.click(this.move(event))));
+					document.addEventListener('lostpointercapture', event => this.pointer.classList.remove(event.pointerType+'-'+event.which, this.click(event)));
+				}
+				move(event) {
+					this.pointer.style.left = event.pageX+'px';
+					this.pointer.style.top = event.pageY+'px';
+					return event;
+				}
+				click(event) {
+					for (var i = 0; i < 5; ++i) {
+						this.pointer.classList.toggle(event.pointerType+'-'+i, event.buttons & (1 << i));
+					}
+				}
+			}, {
+				init: function() {
+					if (!customElements.get('app-pointer'))
+						window.customElements.define('app-pointer', this);
+				},
+				run: function() {
+					this.init(document.body.appendChild(document.createElement('app-pointer')));
+				}
+			})).run();
+		}, false))),
 		tabnew: async page => (page = Object.assign((await browser.newPage()), {
 			setUrl: (url, opt={}) => page.goto(url, opt),
 			setProxy: (module.exports.Proxy ? proxy => page.setExtraHTTPHeaders({
 				proxy: proxy
 			}) : null),
+			pointer: () => browser.pointer(page),
 			eval: (...args) => page.evaluate(...(args.concat([{
 				toObject: ['el', `
 					obj = {}
