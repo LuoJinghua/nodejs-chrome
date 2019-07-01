@@ -201,7 +201,7 @@ module.exports = (async (opt={}) => {
 				}
 			},
 			setProxy: async proxy => {
-				if (request) {
+				if (!request) {
 					if (!opt.proxy)
 						throw (new Error('For this architecture, use: chrome({proxy: \''+proxy+'\'})'));
 				}else{
