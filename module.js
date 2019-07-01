@@ -18,10 +18,31 @@ require('nodejs-chrome')().then(browser => {
 		});
 	});
 });
+// EXAMPLE 3
+var browser = await chrome({
+	headless: true,
+	proxy: 'http://91.82.42.2:43881'
+});
+var page = await browser.tabnew();
+try {
+	await page.setDevice({
+		"name": "Mobile | Pixel 2",
+		"userAgent": "Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD3.170816.012) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3765.0 Mobile Safari/537.36",
+		"viewport": {
+			"width": 411, "height": 731, "deviceScaleFactor": 2.625, "isMobile": true, "hasTouch": false, "isLandscape": false
+		}
+	});
+	await page.setProxy('http://91.82.42.2:43881');
+	await page.setUrl('https://ifconfig.io/all.json');
+	console.log(JSON.parse(await page.$eval('body', el => el.innerText)).ip == '91.82.42.2');
+} catch (e) {
+	console.error(e);
+}
+return browser.exit();
 */
 module.exports = (async (opt={}) => {
 	try {
-		var proxy, ws, browser,
+		var /* proxy,*/ ws, browser,
 			net = require('net'),
 			http = require('http'),
 			exec = require('child_process').exec,
@@ -30,8 +51,12 @@ module.exports = (async (opt={}) => {
 			pt = (((process.arch != "x64") || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'),
 			puppeteer = require((module.path || process.cwd()+'/node_modules/nodejs-chrome')+'/node_modules/'+pt);
 	} catch (e) {
-		process.exit(console.error('Error: npm install'));
+		throw (new Error('npm install'));
 	}
+	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
+	if (opt.proxy)
+		opt.args = opt.args.concat(['--proxy-server='+opt.proxy]);
+	/*
 	if (module.exports.Proxy && ('Server' in module.exports.Proxy)) {
 		(proxy = new module.exports.Proxy.Server({
 			port: ((chronos ? 8000 : module.exports.Proxy.port) || (await (new Promise((resolve, reject) => {
@@ -39,12 +64,17 @@ module.exports = (async (opt={}) => {
 			})))),
 			prepareRequestFunction: ({
 				request, username, password, hostname, port, isHttp, connectionId
-			}) => ((request.headers && request.headers.proxy) ? {
-				upstreamProxyUrl: ((request.headers.proxy.indexOf('://') == -1) ? 'http://' : '')+request.headers.proxy
-			} : null)
+			}) => {
+				if (request.url == 'ifconfig.io:443')
+					console.log(request.headers);
+				return ((request.headers && request.headers.proxy) ? {
+					upstreamProxyUrl: ((request.headers.proxy.indexOf('://') == -1) ? 'http://' : '')+request.headers.proxy
+				} : null)
+			}
 		})).listen(() => console.log('Proxy server is listening on port '+proxy.port));
 		opt.args = (opt.args || []).concat(['--proxy-server=http://127.0.0.1:'+proxy.port]);
 	}
+	*/
 	ws = (await new Promise((resolve, reject) => {
 		http.get('http://localhost:9222/json/version', (res, body='') => {
 			res.on('data', (chunk) => (body += chunk));
@@ -64,12 +94,31 @@ module.exports = (async (opt={}) => {
 			name: pt,
 			module: puppeteer
 		},
-		Proxy: module.exports.Proxy,
-		proxy: proxy,
+		// Proxy: module.exports.Proxy,
+		// proxy: proxy,
 		ws: ws,
 		browser: browser,
-		pointer: page_ => page_.evaluateOnNewDocument(() => ((window === window.parent) && window.addEventListener('DOMContentLoaded', () => {
-			(Object.assign(class extends HTMLElement {
+		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
+		targetTab: (_page, _notnew) => browser.waitForTarget(_target => (_target.opener() === _page.target()), {
+			timeout: 5000
+		}).then(_target => _target.page().then(_tab => browser.tab(_tab)).then(async _tab => {
+			await _tab.setOfflineMode(true); // TODO: придумать как оборвать соединение, чтоб не успели передаться данные
+			if (_page._proxy)
+				await _tab.setProxy(_page._proxy);
+			if (_page._coords) {
+				await _tab.setGeolocation((_tab._coords = _page._coords));
+				browser.defaultBrowserContext().overridePermissions((new URL(_tab.url())).origin, ['geolocation']);
+			}
+			if (_page._pointer)
+				await browser.pointer(_tab, !_notnew);
+			if (!_page._device || !_page._device.viewport.hasTouch)
+				await _tab.mouse.move(_page.mouse._x, _page.mouse._y);
+			if (_page._device)
+				await _tab.setDevice(_page._device);
+			return _tab;
+		})).catch(() => null),
+		pointer: (_page, _new) => (_page._pointer = true) && _page[(_new ? 'evaluateOnNewDocument' : 'evaluate')](() => ((window === window.parent) && (() => window.addEventListener('DOMContentLoaded', () => {
+			(class extends HTMLElement {
 				constructor(...args) {
 					super(...args);
 					this.dom = this.attachShadow({mode: 'open'});
@@ -105,22 +154,71 @@ module.exports = (async (opt={}) => {
 						this.pointer.classList.toggle(event.pointerType+'-'+i, event.buttons & (1 << i));
 					}
 				}
-			}, {
-				init: function() {
+				init() {
 					if (!customElements.get('app-pointer'))
-						window.customElements.define('app-pointer', this);
-				},
-				run: function() {
+						window.customElements.define('app-pointer', this.constructor);
+				}
+				run() {
 					this.init(document.body.appendChild(document.createElement('app-pointer')));
 				}
-			})).run();
-		}, false))),
-		tabnew: async page => (page = Object.assign((await browser.newPage()), {
-			setUrl: (url, opt={}) => page.goto(url, opt),
+			}).prototype.run();
+		}, false))())),
+		tab: page => Object.assign(page, {
+			_proxy: (opt.proxy || null),
+			_coords: null,
+			_device: null,
+			_pointer: false,
+			setGeoPosition: coords => (page._coords = coords),
+			setUrl: async (url, opt={}) => {
+				if (page._coords) {
+					await page.setGeolocation(page._coords);
+					browser.defaultBrowserContext().overridePermissions((new URL(url)).origin, ['geolocation']);
+				}
+				return await page.goto(url, opt);
+			},
+			fetch: async req => {
+				if (!page._proxy) // if (!req.headers['proxy']) // if (['document', 'xhr'].indexOf(req.resourceType()) === -1)
+					req.continue();
+				else{
+					var res = await (new Promise((resolve, reject) => request({
+						uri: req.url(),
+						method: req.method(),
+						headers: req.headers(),
+						body: req.postData(),
+						usingProxy: true,
+						tunnel: true,
+						strictSSL: false,
+						proxy: page._proxy, // req.headers['proxy'],
+						resolveWithFullResponse: true
+					}, (err, res, body) => (err ? reject(err) : resolve(res)))));
+					req.respond({
+						status: res.statusCode,
+						contentType: res.headers['content-type'],
+						headers: res.headers,
+						body: res.body
+					});
+				}
+			},
+			setProxy: async proxy => {
+				if ((process.arch != "x64") || chronos) {
+					if (!page._proxy)
+						throw (new Error('For this architecture, use: chrome({proxy: \''+proxy+'\'})'));
+				}else{
+					await page.setRequestInterception(true);
+					page.removeListener('request', page.fetch);
+					if (!page._proxy && proxy) {
+						page._proxy = proxy;
+						page.on('request', page.fetch);
+					}
+				}
+			},
+			/*
 			setProxy: (module.exports.Proxy ? proxy => page.setExtraHTTPHeaders({
 				proxy: proxy
 			}) : null),
-			pointer: () => browser.pointer(page),
+			*/
+			setDevice: device => page.emulate((page._device = device)),
+			pointer: () => browser.pointer(page, true),
 			eval: (...args) => page.evaluate(...(args.concat([{
 				toObject: ['el', `
 					obj = {}
@@ -133,16 +231,11 @@ module.exports = (async (opt={}) => {
 			exit: () => page.close({
 				runBeforeUnload: true
 			})
-			/* exit: () => {
-				if (browser._process)
-					return page.close();
-				else
-					return new Promise((resolve, reject) => page.close(browser.on('targetdestroyed', () => resolve())));
-			} */
-		})),
+		}),
+		tabnew: () => browser.newPage().then(page => browser.tab(page)),
 		exit: () => {
-			if (proxy)
-				proxy.close();
+			// if (proxy)
+				// proxy.close();
 			return browser[(browser._process ? 'close' : 'disconnect')]();
 		}
 	}));

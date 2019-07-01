@@ -1,6 +1,6 @@
 {
 	"name": "nodejs-chrome",
-	"version": "1.2.2",
+	"version": "1.2.3",
 	"description": "",
 	"main": "module.js",
 	"scripts": {
