@@ -48,7 +48,8 @@ module.exports = (async (opt={}) => {
 			exec = require('child_process').exec,
 			lambda = (process.argv[1].match('awslambda') && require('chrome-aws-lambda')),
 			chronos = ((process.env.SUDO_USER || process.env.USER) == 'chronos'),
-			pt = (((process.arch != "x64") || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'),
+			pt = (((process.arch != 'x64') || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'),
+			request = ((pt == 'puppeteer') && require('request')),
 			puppeteer = require((module.path || process.cwd()+'/node_modules/nodejs-chrome')+'/node_modules/'+pt);
 	} catch (e) {
 		throw (new Error('npm install'));
@@ -87,7 +88,7 @@ module.exports = (async (opt={}) => {
 		args: lambda.args.concat((opt.args || [])),
 		executablePath: await lambda.executablePath,
 		headless: lambda.headless
-	} : ((process.arch != "x64") ? {
+	} : ((process.arch != 'x64') ? {
 		executablePath: await new Promise((resolve, reject) => exec('which chromium-browser chromium', (err, data) => resolve(data.trim())))
 	} : {})), opt)))), {
 		parent: {
@@ -200,15 +201,19 @@ module.exports = (async (opt={}) => {
 				}
 			},
 			setProxy: async proxy => {
-				if ((process.arch != "x64") || chronos) {
-					if (!page._proxy)
+				if (request) {
+					if (!opt.proxy)
 						throw (new Error('For this architecture, use: chrome({proxy: \''+proxy+'\'})'));
 				}else{
-					await page.setRequestInterception(true);
-					page.removeListener('request', page.fetch);
-					if (!page._proxy && proxy) {
-						page._proxy = proxy;
-						page.on('request', page.fetch);
+					if (opt.proxy)
+						throw (new Error('you use a proxy: chrome({proxy: \''+opt.proxy+'\'})'));
+					else{
+						await page.setRequestInterception(true);
+						page.removeListener('request', page.fetch);
+						if (!page._proxy && proxy) {
+							page._proxy = proxy;
+							page.on('request', page.fetch);
+						}
 					}
 				}
 			},
