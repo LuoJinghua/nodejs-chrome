@@ -164,7 +164,7 @@ module.exports = (async (opt={}) => {
 				}
 			}).prototype.run();
 		}, false))())),
-		tab: page => Object.assign(page, {
+		tab: page => Object.assign(page, page.evaluateOnNewDocument(() => (delete navigator.__proto__.webdriver)), {
 			_proxy: (opt.proxy || null),
 			_coords: null,
 			_device: null,
