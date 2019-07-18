@@ -42,7 +42,7 @@ return browser.exit();
 */
 module.exports = (async (opt={}) => {
 	try {
-		var /* proxy,*/ ws, browser,
+		var ws, browser,
 			net = require('net'),
 			http = require('http'),
 			exec = require('child_process').exec,
@@ -56,26 +56,7 @@ module.exports = (async (opt={}) => {
 	}
 	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
 	if (opt.proxy)
-		opt.args = opt.args.concat(['--proxy-server='+opt.proxy]);
-	/*
-	if (module.exports.Proxy && ('Server' in module.exports.Proxy)) {
-		(proxy = new module.exports.Proxy.Server({
-			port: ((chronos ? 8000 : module.exports.Proxy.port) || (await (new Promise((resolve, reject) => {
-				var server = net.createServer().on('error', reject).unref().listen(port => ((port = server.address().port) && server.close(() => resolve(port))));
-			})))),
-			prepareRequestFunction: ({
-				request, username, password, hostname, port, isHttp, connectionId
-			}) => {
-				if (request.url == 'ifconfig.io:443')
-					console.log(request.headers);
-				return ((request.headers && request.headers.proxy) ? {
-					upstreamProxyUrl: ((request.headers.proxy.indexOf('://') == -1) ? 'http://' : '')+request.headers.proxy
-				} : null)
-			}
-		})).listen(() => console.log('Proxy server is listening on port '+proxy.port));
-		opt.args = (opt.args || []).concat(['--proxy-server=http://127.0.0.1:'+proxy.port]);
-	}
-	*/
+		opt.args = opt.args.concat(['--proxy-server='+opt.proxy.replace(/(:\/\/:?)(.*?)@/gi, '$1')]);
 	ws = (await new Promise((resolve, reject) => {
 		http.get('http://localhost:9222/json/version', (res, body='') => {
 			res.on('data', (chunk) => (body += chunk));
@@ -95,8 +76,6 @@ module.exports = (async (opt={}) => {
 			name: pt,
 			module: puppeteer
 		},
-		// Proxy: module.exports.Proxy,
-		// proxy: proxy,
 		ws: ws,
 		browser: browser,
 		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
@@ -164,7 +143,10 @@ module.exports = (async (opt={}) => {
 				}
 			}).prototype.run();
 		}, false))())),
-		tab: page => Object.assign(page, page.evaluateOnNewDocument(() => (delete navigator.__proto__.webdriver)), {
+		tab: page => Object.assign(page, page.evaluateOnNewDocument(() => (delete navigator.__proto__.webdriver)), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
+			username: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[0],
+			password: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[1]
+		})), {
 			_proxy: (opt.proxy || null),
 			_coords: null,
 			_device: null,
@@ -189,7 +171,7 @@ module.exports = (async (opt={}) => {
 						usingProxy: true,
 						tunnel: true,
 						strictSSL: false,
-						proxy: page._proxy, // req.headers['proxy'],
+						proxy: page._proxy,
 						resolveWithFullResponse: true
 					}, (err, res, body) => (err ? reject(err) : resolve(res)))));
 					req.respond({
@@ -202,7 +184,7 @@ module.exports = (async (opt={}) => {
 			},
 			setProxy: async proxy => {
 				if (!request) {
-					if (!opt.proxy)
+					if (!opt.proxy && proxy)
 						throw (new Error('For this architecture, use: chrome({proxy: \''+proxy+'\'})'));
 				}else{
 					if (opt.proxy)
@@ -217,11 +199,6 @@ module.exports = (async (opt={}) => {
 					}
 				}
 			},
-			/*
-			setProxy: (module.exports.Proxy ? proxy => page.setExtraHTTPHeaders({
-				proxy: proxy
-			}) : null),
-			*/
 			setDevice: device => page.emulate((page._device = device)),
 			pointer: () => browser.pointer(page, true),
 			eval: (...args) => page.evaluate(...(args.concat([{
@@ -238,10 +215,6 @@ module.exports = (async (opt={}) => {
 			})
 		}),
 		tabnew: () => browser.newPage().then(page => browser.tab(page)),
-		exit: () => {
-			// if (proxy)
-				// proxy.close();
-			return browser[(browser._process ? 'close' : 'disconnect')]();
-		}
+		exit: () => browser[(browser._process ? 'close' : 'disconnect')]()
 	}));
 });
