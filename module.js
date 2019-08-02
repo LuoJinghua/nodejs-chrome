@@ -201,13 +201,18 @@ module.exports = (async (opt={}) => {
 			},
 			setDevice: device => page.emulate((page._device = device)),
 			tapClick: async (selector, o={}) => {
-				await page.waitForSelector(selector); // await page.waitForNavigation();
-				var els = await page.$$eval(selector, (els) => els.map(el => ({
+				o.selector_ = (selector.match(/->/g) ? selector.replace(/->(?:.*?)(,|$)/g, '$1') : null);
+				await page.waitForSelector((o.selector_ || selector)); // await page.waitForNavigation();
+				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => ({
 					title: el.innerText,
 					url: el.href,
 					selector: (selector && selector.filter(v => (document.querySelector(v) == el)).slice(-1).join()),
 					pos: JSON.parse(JSON.stringify(el.getBoundingClientRect()))
-				})));
+				})), (o.selector_ && selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), [])));
+				if (o.filter) {
+					o.filter.k_ = Object.keys(o.filter).filter(k => (k != 'flags'))[0];
+					els = els.filter(el => el[o.filter.k_].match(new RegExp(o.filter[o.filter.k_], o.filter.flags)));
+				}
 				if (!els[0])
 					return null;
 				if (!!page._viewport.hasTouch)
@@ -219,6 +224,13 @@ module.exports = (async (opt={}) => {
 					});
 					await page.mouse.click(c[0], c[1]);
 				}
+				if (els[0].selector && (selector = selector.split(',').reduce((out, v) => {
+					var is = false;
+					return out.concat([v.split('->').filter(v => {
+						return ((!is && (v.trim() == els[0].selector)) ? ((is = true) && false) : is);
+					}).join('->')]);
+				}, []).filter(Boolean).join(',')))
+					return page.tapClick(selector, o);
 				if (o.input) {
 					await page.keyboard.type(o.input);
 					if (o.send)
