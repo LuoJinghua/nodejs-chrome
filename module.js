@@ -202,24 +202,30 @@ module.exports = (async (opt={}) => {
 			setDevice: device => page.emulate((page._device = device)),
 			tapClick: async (selector, o={}) => {
 				await page.waitForSelector(selector); // await page.waitForNavigation();
-				var els = await page.$$eval(selector, els => els.map(el => ({
+				var els = await page.$$eval(selector, (els) => els.map(el => ({
 					title: el.innerText,
 					url: el.href,
+					selector: (selector && selector.filter(v => (document.querySelector(v) == el)).slice(-1).join()),
 					pos: JSON.parse(JSON.stringify(el.getBoundingClientRect()))
 				})));
-				if (o.filter) {
-					o.filter.k_ = Object.keys(o.filter).filter(k => (k != 'flags'))[0];
-					els = els.filter(el => el[o.filter.k_].match(new RegExp(o.filter[o.filter.k_], o.filter.flags)));
-				}
 				if (!els[0])
 					return null;
 				if (!!page._viewport.hasTouch)
 					await page.touchscreen.tap((els[0].pos.x + els[0].pos.width / 2), (els[0].pos.y + els[0].pos.height / 2));
 				else{
-					var c = [(els[0].pos.x + rand(25, (els[0].pos.width - 25))), (els[0].pos.y + 10)];
-					await page.mouse.move(c[0], c[1], {steps: rand(10, 30)});
+					var c = [(els[0].pos.x + (Math.floor(Math.random() * ((els[0].pos.width - 25) - 26)) + 25)), (els[0].pos.y + 10)]; // rand(25, (els[0].pos.width - 25))
+					await page.mouse.move(c[0], c[1], {
+						steps: Math.floor(Math.random() * 19) + 10 // rand(10, 30)
+					});
 					await page.mouse.click(c[0], c[1]);
 				}
+				if (o.input) {
+					await page.keyboard.type(o.input);
+					if (o.send)
+						await page.keyboard.down('Enter');
+				}
+				if (o.wait)
+					await page.waitForNavigation();
 				return els[0];
 			},
 			pointer: () => browser.pointer(page, true),
