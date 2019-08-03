@@ -203,28 +203,42 @@ module.exports = (async (opt={}) => {
 			tapClick: async (selector, o={}) => {
 				o.selector_ = (selector.match(/->/g) ? selector.replace(/->(?:.*?)(,|$)/g, '$1') : null);
 				await page.waitForSelector((o.selector_ || selector)); // await page.waitForNavigation();
-				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => ({
-					title: el.innerText,
-					url: el.href,
-					selector: (selector && selector.filter(v => (document.querySelector(v) == el)).slice(-1).join()),
-					pos: JSON.parse(JSON.stringify(el.getBoundingClientRect()))
-				})), (o.selector_ && selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), [])));
+				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => {
+					var pos = el.getBoundingClientRect();
+					return {
+						title: el.innerText,
+						url: el.href,
+						visible: (
+							((window.pageYOffset + pos.bottom) > window.pageYOffset) &&
+							((window.pageYOffset + pos.top) < (window.pageYOffset + document.documentElement.clientHeight)) &&
+							((window.pageXOffset + pos.right) > window.pageXOffset) &&
+							((window.pageXOffset + pos.left) < (window.pageXOffset + document.documentElement.clientWidth))
+						),
+						selector: selector.filter(v => (document.querySelector(v) == el)).slice(-1).join(),
+						pos: JSON.parse(JSON.stringify(pos))
+					};
+				}), selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), []));
 				if (o.filter) {
 					o.filter.k_ = Object.keys(o.filter).filter(k => (k != 'flags'))[0];
 					els = els.filter(el => el[o.filter.k_].match(new RegExp(o.filter[o.filter.k_], o.filter.flags)));
 				}
 				if (!els[0])
 					return null;
+				if (!els[0].visible && (els[0].pos.width > 0) && (els[0].pos.height > 0)) {
+					await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
+					return page.tapClick(selector, o);
+				}
 				if (!!page._viewport.hasTouch)
 					await page.touchscreen.tap((els[0].pos.x + els[0].pos.width / 2), (els[0].pos.y + els[0].pos.height / 2));
 				else{
 					var c = [(els[0].pos.x + (Math.floor(Math.random() * ((els[0].pos.width - 25) - 26)) + 25)), (els[0].pos.y + 10)]; // rand(25, (els[0].pos.width - 25))
-					await page.mouse.move(c[0], c[1], {
-						steps: Math.floor(Math.random() * 19) + 10 // rand(10, 30)
-					});
+					if (o.cursor !== false)
+						await page.mouse.move(c[0], c[1], {
+							steps: Math.floor(Math.random() * 19) + 10 // rand(10, 30)
+						});
 					await page.mouse.click(c[0], c[1]);
 				}
-				if (els[0].selector && (selector = selector.split(',').reduce((out, v) => {
+				if (o.selector_ && (selector = selector.split(',').reduce((out, v) => {
 					var is = false;
 					return out.concat([v.split('->').filter(v => {
 						return ((!is && (v.trim() == els[0].selector)) ? ((is = true) && false) : is);
@@ -238,6 +252,7 @@ module.exports = (async (opt={}) => {
 				}
 				if (o.wait)
 					await page.waitForNavigation();
+				els[0].$$ = JSON.parse(JSON.stringify(els));
 				return els[0];
 			},
 			pointer: () => browser.pointer(page, true),
