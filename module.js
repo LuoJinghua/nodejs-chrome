@@ -202,7 +202,7 @@ module.exports = (async (opt={}) => {
 			setDevice: device => page.emulate((page._device = device)),
 			tapClick: async (selector, o={}) => {
 				o.selector_ = (selector.match(/->/g) ? selector.replace(/->(?:.*?)(,|$)/g, '$1') : null);
-				await page.waitForSelector((o.selector_ || selector)); // await page.waitForNavigation();
+				await page.waitForSelector((o.selector_ || selector));
 				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => {
 					var pos = el.getBoundingClientRect();
 					return {
@@ -215,6 +215,24 @@ module.exports = (async (opt={}) => {
 							((window.pageXOffset + pos.left) < (window.pageXOffset + document.documentElement.clientWidth))
 						),
 						selector: selector.filter(v => (document.querySelector(v) == el)).slice(-1).join(),
+						selector_: (() => {
+							var names = [];
+							while (el.parentNode) {
+								if (el.id) {
+									names.unshift('#'+el.id);
+									break;
+								}else{
+									if (el == el.ownerDocument.documentElement)
+										names.unshift(el.tagName);
+									else{
+										for (var c=1,e=el;e.previousElementSibling;e=e.previousElementSibling,c++);
+										names.unshift(el.tagName+':nth-child('+c+')');
+									}
+									el = el.parentNode;
+								}
+							}
+							return names.join(' > ');
+						})(),
 						pos: JSON.parse(JSON.stringify(pos))
 					};
 				}), selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), []));
@@ -227,7 +245,11 @@ module.exports = (async (opt={}) => {
 				if (!els[0].visible && (els[0].pos.width > 0) && (els[0].pos.height > 0)) {
 					await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
 					return page.tapClick(selector, o);
+				}else if (!els[0].visible && !els.sort((a, b) => (b.visible - a.visible))[0].visible) {
+					await page.waitFor(1000);
+					return page.tapClick(selector, o);
 				}
+				await page.waitFor(500);
 				if (!!page._viewport.hasTouch)
 					await page.touchscreen.tap((els[0].pos.x + els[0].pos.width / 2), (els[0].pos.y + els[0].pos.height / 2));
 				else{
@@ -246,6 +268,7 @@ module.exports = (async (opt={}) => {
 				}, []).filter(Boolean).join(',')))
 					return page.tapClick(selector, o);
 				if (o.input) {
+					await page.waitForSelector(els[0].selector_);
 					await page.keyboard.type(o.input);
 					if (o.send)
 						await page.keyboard.down('Enter');
