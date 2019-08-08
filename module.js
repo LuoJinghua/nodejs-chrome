@@ -65,17 +65,20 @@ module.exports = (async (opt={}) => {
 	}).then(e => ({
 		browserWSEndpoint: e.webSocketDebuggerUrl
 	})).catch(() => (chronos ? process.exit(console.error('Error: --remote-debugging-port=9222 => /etc/chrome_dev.conf')) : null)));
-	return await (Object.assign(browser = (await (ws ? puppeteer.connect(Object.assign(ws, opt)) : puppeteer.launch(Object.assign((lambda ? {
+	browser = (await (ws ? puppeteer.connect(Object.assign(ws, opt)) : puppeteer.launch(Object.assign((lambda ? {
 		args: lambda.args.concat((opt.args || [])),
 		executablePath: await lambda.executablePath,
 		headless: lambda.headless
 	} : ((process.arch != 'x64') ? {
 		executablePath: await new Promise((resolve, reject) => exec('which chromium-browser chromium', (err, data) => resolve(data.trim())))
-	} : {})), opt)))), {
+	} : {})), opt))));
+	browser.on('targetcreated', async target => ((target.type() === 'page') && (browser._page = await target.page())));
+	return await (Object.assign(browser, {
 		parent: {
 			name: pt,
 			module: puppeteer
 		},
+		_page: null,
 		ws: ws,
 		browser: browser,
 		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
@@ -151,6 +154,10 @@ module.exports = (async (opt={}) => {
 			_coords: null,
 			_device: null,
 			_pointer: false,
+			focusTab: () => {
+				var focus = browser._page;
+				return page.bringToFront((browser._page = page)).then(() => focus);
+			},
 			setGeoPosition: coords => (page._coords = coords),
 			setUrl: async (url, opt={}) => {
 				if (page._coords) {
