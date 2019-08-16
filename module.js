@@ -57,6 +57,19 @@ module.exports = (async (opt={}) => {
 	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
 	if (opt.proxy)
 		opt.args = opt.args.concat(['--proxy-server='+opt.proxy.replace(/(:\/\/:?)(.*?)@/gi, '$1')]);
+	if (opt.device) {
+		if (opt.device.userAgent)
+			opt.args = opt.args.concat(['--user-agent='+opt.device.userAgent]);
+		if (opt.device.viewport) {
+			opt.defaultViewport = null;
+			if (opt.device.viewport.width && opt.device.viewport.height)
+				opt.args = opt.args.concat(['--window-size='+[opt.device.viewport.width, opt.device.viewport.height].join(',')]);
+			if (opt.device.viewport.deviceScaleFactor)
+				opt.args = opt.args.concat(['--force-device-scale-factor='+opt.device.viewport.deviceScaleFactor]);
+			if (opt.device.viewport.hasTouch)
+				opt.args = opt.args.concat(['--touch-events=enabled']);
+		}
+	}
 	ws = (await new Promise((resolve, reject) => {
 		http.get('http://localhost:9222/json/version', (res, body='') => {
 			res.on('data', (chunk) => (body += chunk));
@@ -81,6 +94,7 @@ module.exports = (async (opt={}) => {
 		_page: null,
 		ws: ws,
 		browser: browser,
+		port: browser._connection._url.replace(/^ws:\/\/(?:.*?):(.*?)\/(?:.*?)$/, '$1'),
 		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
 		targetTab: (_page, _notnew) => browser.waitForTarget(_target => (_target.opener() === _page.target()), {
 			timeout: 5000
@@ -146,7 +160,17 @@ module.exports = (async (opt={}) => {
 				}
 			}).prototype.run();
 		}, false))())),
-		tab: page => Object.assign(page, page.evaluateOnNewDocument(() => (delete navigator.__proto__.webdriver)), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
+		tab: page => Object.assign(page, page.evaluateOnNewDocument(opt => {
+			if (opt.device && opt.device.viewport && opt.device.viewport.isLandscape && window.screen && window.screen.orientation)
+				Object.defineProperty(window.screen.orientation, 'type', {
+					value: 'landscape-primary'
+				});
+			if (opt.device && opt.device.viewport && opt.device.viewport.hasTouch)
+				Object.defineProperty(navigator, 'maxTouchPoints', {
+					value: (opt.device.touchPoints || 1)
+				});
+			delete navigator.__proto__.webdriver
+		}, opt), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
 			username: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[0],
 			password: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[1]
 		})), {
@@ -249,6 +273,8 @@ module.exports = (async (opt={}) => {
 				}
 				if (!els[0])
 					return null;
+				if (o.eval)
+					await page.$$eval(els.map(el => el.selector_).join(), (els, eval) => els.map(el => (new Function('el', eval))(el)), o.eval);
 				if (!els[0].visible && (els[0].pos.width > 0) && (els[0].pos.height > 0)) {
 					await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
 					return page.tapClick(selector, o);
@@ -285,6 +311,8 @@ module.exports = (async (opt={}) => {
 				els[0].$$ = JSON.parse(JSON.stringify(els));
 				return els[0];
 			},
+			json: () => page.$eval('pre', el => JSON.parse(el.innerText)), // page.evaluate(() => JSON.parse(document.body.innerText)),
+			text: () => page.content(),
 			pointer: () => browser.pointer(page, true),
 			eval: (...args) => page.evaluate(...(args.concat([{
 				toObject: ['el', `
