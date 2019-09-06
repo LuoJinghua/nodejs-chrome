@@ -56,7 +56,7 @@ module.exports = (async (opt={}) => {
 	}
 	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
 	if (opt.proxy)
-		opt.args = opt.args.concat(['--proxy-server='+opt.proxy.replace(/(:\/\/:?)(.*?)@/gi, '$1')]);
+		opt.args = opt.args.concat(['--proxy-server='+(opt.proxy.match('://') ? opt.proxy : (opt.proxy = 'http://'+opt.proxy)).replace(/(:\/\/:?)(.*?)@/gi, '$1')]);
 	if (opt.device) {
 		if (opt.device.userAgent)
 			opt.args = opt.args.concat(['--user-agent='+opt.device.userAgent]);
@@ -68,6 +68,7 @@ module.exports = (async (opt={}) => {
 				opt.args = opt.args.concat(['--force-device-scale-factor='+opt.device.viewport.deviceScaleFactor]);
 			if (opt.device.viewport.hasTouch)
 				opt.args = opt.args.concat(['--touch-events=enabled']);
+			opt.args = opt.args.concat(['--disable-web-security']);
 		}
 	}
 	ws = (await new Promise((resolve, reject) => {
@@ -169,6 +170,11 @@ module.exports = (async (opt={}) => {
 				Object.defineProperty(navigator, 'maxTouchPoints', {
 					value: (opt.device.touchPoints || 1)
 				});
+			/*
+			Element.prototype.documentOffsetTop = function() {
+				return this.offsetTop + (this.offsetParent ? this.offsetParent.documentOffsetTop() : 0);
+			};
+			*/
 			delete navigator.__proto__.webdriver
 		}, opt), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
 			username: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[0],
@@ -233,7 +239,11 @@ module.exports = (async (opt={}) => {
 			setDevice: device => page.emulate((page._device = device)),
 			tapClick: async (selector, o={}) => {
 				o.selector_ = (selector.match(/->/g) ? selector.replace(/->(?:.*?)(,|$)/g, '$1') : null);
-				await page.waitForSelector((o.selector_ || selector));
+				try {
+					await page.waitForSelector((o.selector_ || selector));
+				} catch(e) {
+					return (o.debug ? [] : null);
+				}
 				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => {
 					var pos = el.getBoundingClientRect();
 					return {
@@ -271,19 +281,35 @@ module.exports = (async (opt={}) => {
 					o.filter.k_ = Object.keys(o.filter).filter(k => (k != 'flags'))[0];
 					els = els.filter(el => el[o.filter.k_].match(new RegExp(o.filter[o.filter.k_], o.filter.flags)));
 				}
+				if (o.debug)
+					return els;
 				if (!els[0])
 					return null;
 				if (o.eval)
 					await page.$$eval(els.map(el => el.selector_).join(), (els, eval) => els.map(el => (new Function('el', eval))(el)), o.eval);
 				if (!els[0].visible && (els[0].pos.width > 0) && (els[0].pos.height > 0)) {
-					await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
-					return page.tapClick(selector, o);
+					/*
+					await page.evaluate(selector => {
+						var el = document.querySelector(selector);
+						window.scrollTo(0, (el.documentOffsetTop() - (window.innerHeight / 2)));
+					}, (els[0].selector || selector));
+					*/
+					if (o.input)
+						await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
+					else
+						await page.evaluate(selector => document.querySelector(selector).scrollIntoView({
+							behavior: 'smooth',
+							block: 'center',
+							inline: 'center'
+						}), (els[0].selector || selector));
+					await page.waitFor(1000);
+					return page.tapClick((els[0].selector || selector), o);
 				}else if (!els[0].visible && !els.sort((a, b) => (b.visible - a.visible))[0].visible) {
 					await page.waitFor(1000);
 					return page.tapClick(selector, o);
 				}
 				await page.waitFor(500);
-				if (!!page._viewport.hasTouch)
+				if ((page._viewport && !!page._viewport.hasTouch) || (opt.device && opt.device.viewport && opt.device.viewport.hasTouch))
 					await page.touchscreen.tap((els[0].pos.x + els[0].pos.width / 2), (els[0].pos.y + els[0].pos.height / 2));
 				else{
 					var c = [(els[0].pos.x + (Math.floor(Math.random() * ((els[0].pos.width - 25) - 26)) + 25)), (els[0].pos.y + 10)]; // rand(25, (els[0].pos.width - 25))
