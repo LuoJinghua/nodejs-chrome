@@ -95,6 +95,7 @@ module.exports = (async (opt={}) => {
 		_page: null,
 		ws: ws,
 		browser: browser,
+		userDataDir: browser._process.spawnargs.filter(v => v.match('--user-data-dir=')).join('').split('=').slice(1, 2).join(),
 		port: browser._connection._url.replace(/^ws:\/\/(?:.*?):(.*?)\/(?:.*?)$/, '$1'),
 		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
 		targetTab: (_page, _notnew) => browser.waitForTarget(_target => (_target.opener() === _page.target()), {
