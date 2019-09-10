@@ -101,8 +101,8 @@ module.exports = (async (opt={}) => {
 		targetTab: (_page, _notnew) => browser.waitForTarget(_target => (_target.opener() === _page.target()), {
 			timeout: 5000
 		}).then(_target => _target.page().then(_tab => browser.tab(_tab)).then(async _tab => {
-			await _tab.setOfflineMode(true); // TODO: придумать как оборвать соединение, чтоб не успели передаться данные
-			if (_page._proxy)
+			// await _tab.setOfflineMode(true); // TODO: придумать как оборвать соединение, чтоб не успели передаться данные
+			if (_page._proxy && !opt.proxy)
 				await _tab.setProxy(_page._proxy);
 			if (_page._coords) {
 				await _tab.setGeolocation((_tab._coords = _page._coords));
@@ -112,7 +112,7 @@ module.exports = (async (opt={}) => {
 				await browser.pointer(_tab, !_notnew);
 			if (!_page._device || !_page._device.viewport.hasTouch)
 				await _tab.mouse.move(_page.mouse._x, _page.mouse._y);
-			if (_page._device)
+			if (_page._device && !opt.device)
 				await _tab.setDevice(_page._device);
 			return _tab;
 		})).catch(() => null),
