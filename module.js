@@ -185,6 +185,7 @@ module.exports = (async (opt={}) => {
 			_coords: null,
 			_device: null,
 			_pointer: false,
+			_viewport: (page._viewport || (opt.device ? opt.device.viewport : null)),
 			focusTab: () => {
 				var focus = browser._page;
 				return page.bringToFront((browser._page = page)).then(() => focus);
@@ -360,9 +361,26 @@ module.exports = (async (opt={}) => {
 				else if (res.result.value)
 					return res.result.value;
 			},
-			exit: () => page.close({
-				runBeforeUnload: true
-			})
+			back: async (fast) => {
+				if (!fast && !page._viewport.hasTouch) {
+					await page.mouse.move(10, 0, {
+						steps: 50
+					});
+					await page.waitFor(1000);
+				}
+				return page.goBack();
+			},
+			exit: async (fast) => {
+				if (!fast && !page._viewport.hasTouch) {
+					await page.mouse.move(page._viewport.width, 0, {
+						steps: 50
+					});
+					await page.waitFor(1000);
+				}
+				return page.close({
+					runBeforeUnload: true
+				})
+			}
 		}),
 		tabnew: () => browser.newPage().then(page => browser.tab(page)),
 		exit: () => browser[(browser._process ? 'close' : 'disconnect')]()
