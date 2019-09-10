@@ -245,39 +245,41 @@ module.exports = (async (opt={}) => {
 				} catch(e) {
 					return (o.debug ? [] : null);
 				}
-				var els = await page.$$eval((o.selector_ || selector), (els, selector) => els.map(el => {
-					var pos = el.getBoundingClientRect();
-					return {
-						title: el.innerText,
-						url: el.href,
-						visible: (
-							((window.pageYOffset + pos.bottom) > window.pageYOffset) &&
-							((window.pageYOffset + pos.top) < (window.pageYOffset + document.documentElement.clientHeight)) &&
-							((window.pageXOffset + pos.right) > window.pageXOffset) &&
-							((window.pageXOffset + pos.left) < (window.pageXOffset + document.documentElement.clientWidth))
-						),
-						selector: selector.filter(v => (document.querySelector(v) == el)).slice(-1).join(),
-						selector_: (() => {
-							var names = [];
-							while (el.parentNode) {
-								if (el.id) {
-									names.unshift('#'+el.id);
-									break;
-								}else{
-									if (el == el.ownerDocument.documentElement)
-										names.unshift(el.tagName);
-									else{
-										for (var c=1,e=el;e.previousElementSibling;e=e.previousElementSibling,c++);
-										names.unshift(el.tagName+':nth-child('+c+')');
+				var els = await page.eval(`(selector_, selector) => {
+					return [...document.querySelectorAll(selector_)].map(el => {
+						var pos = el.getBoundingClientRect();
+						return {
+							title: el.innerText,
+							url: el.href,
+							visible: (
+								((window.pageYOffset + pos.bottom) > window.pageYOffset) &&
+								((window.pageYOffset + pos.top) < (window.pageYOffset + document.documentElement.clientHeight)) &&
+								((window.pageXOffset + pos.right) > window.pageXOffset) &&
+								((window.pageXOffset + pos.left) < (window.pageXOffset + document.documentElement.clientWidth))
+							),
+							selector: selector.filter(v => (document.querySelector(v) == el)).slice(-1).join(),
+							selector_: (() => {
+								var names = [];
+								while (el.parentNode) {
+									if (el.id) {
+										names.unshift('#'+el.id);
+										break;
+									}else{
+										if (el == el.ownerDocument.documentElement)
+											names.unshift(el.tagName);
+										else{
+											for (var c=1,e=el;e.previousElementSibling;e=e.previousElementSibling,c++);
+											names.unshift(el.tagName+':nth-child('+c+')');
+										}
+										el = el.parentNode;
 									}
-									el = el.parentNode;
 								}
-							}
-							return names.join(' > ');
-						})(),
-						pos: JSON.parse(JSON.stringify(pos))
-					};
-				}), selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), []));
+								return names.join(' > ');
+							})(),
+							pos: JSON.parse(JSON.stringify(pos))
+						};
+					});
+				}`, (o.selector_ || selector), selector.split(',').reduce((out, v) => out.concat(v.split('->')).map(v => v.trim()), []))
 				if (o.filter) {
 					o.filter.k_ = Object.keys(o.filter).filter(k => (k != 'flags'))[0];
 					els = els.filter(el => el[o.filter.k_].match(new RegExp(o.filter[o.filter.k_], o.filter.flags)));
@@ -296,13 +298,14 @@ module.exports = (async (opt={}) => {
 					}, (els[0].selector || selector));
 					*/
 					if (o.input)
-						await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
+						await page.eval(`selector => document.querySelector(selector).scrollIntoView()`, (els[0].selector || selector));
+						// await page.evaluate(selector => document.querySelector(selector).scrollIntoView(), (els[0].selector || selector));
 					else
-						await page.evaluate(selector => document.querySelector(selector).scrollIntoView({
+						await page.eval(`selector => document.querySelector(selector).scrollIntoView({
 							behavior: 'smooth',
 							block: 'center',
 							inline: 'center'
-						}), (els[0].selector || selector));
+						})`, (els[0].selector || selector));
 					await page.waitFor(1000);
 					return page.tapClick((els[0].selector || selector), o);
 				}else if (!els[0].visible && !els.sort((a, b) => (b.visible - a.visible))[0].visible) {
@@ -341,15 +344,22 @@ module.exports = (async (opt={}) => {
 			json: () => page.$eval('pre', el => JSON.parse(el.innerText)), // page.evaluate(() => JSON.parse(document.body.innerText)),
 			text: () => page.content(),
 			pointer: () => browser.pointer(page, true),
-			eval: (...args) => page.evaluate(...(args.concat([{
-				toObject: ['el', `
-					obj = {}
-					for (var p in el) {
-						obj[p] = el[p];
-					}
-					return obj;
-				`],
-			}]))),
+			eval: async (pageFunction, ...args) => {
+				var context = await await page._frameManager.mainFrame().executionContext(),
+					suffix = `//# sourceURL=VM30`;
+				var res = await context._client.send('Runtime.callFunctionOn', {
+					functionDeclaration: pageFunction.toString()+'\n'+suffix+'\n',
+					executionContextId: context._contextId,
+					arguments: args.map(arg => ({value: arg})),
+					returnByValue: true,
+					awaitPromise: true,
+					userGesture: true
+				});
+				if (res.exceptionDetails)
+					throw new Error(res.exceptionDetails.exception.description);
+				else if (res.result.value)
+					return res.result.value;
+			},
 			exit: () => page.close({
 				runBeforeUnload: true
 			})
