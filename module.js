@@ -55,6 +55,13 @@ module.exports = (async (opt={}) => {
 		throw (new Error('npm install'));
 	}
 	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
+	if (opt.headless !== false) {
+		opt.env = (opt.env || {});
+		if (opt.timeZone)
+			opt.env.TZ = opt.timeZone;
+	}
+	if (opt.lang)
+		opt.args = opt.args.concat(['--lang='+opt.lang]);
 	if (opt.proxy)
 		opt.args = opt.args.concat(['--proxy-server='+(opt.proxy.match('://') ? opt.proxy : (opt.proxy = 'http://'+opt.proxy)).replace(/(:\/\/:?)(.*?)@/gi, '$1')]);
 	if (opt.device) {
@@ -171,12 +178,205 @@ module.exports = (async (opt={}) => {
 				Object.defineProperty(navigator, 'maxTouchPoints', {
 					value: (opt.device.touchPoints || 1)
 				});
+			window.alert = window.confirm = () => {
+				var now = new Date().getTime(),
+					rand = Math.floor(100 + Math.random() * 901);
+				while (new Date().getTime() < now + rand) {}
+				return true;
+			}
+			if (!window.chrome)
+				window.chrome = {
+					app: { isInstalled: false }
+				}
+			if (!window.chrome.runtime)
+				window.chrome.runtime = {
+					PlatformOs: {
+						ANDROID: 'android',
+						CROS: 'cros',
+						LINUX: 'linux',
+						MAC: 'mac',
+						OPENBSD: 'openbsd',
+						WIN: 'win'
+					},
+					PlatformArch: {
+						ARM: 'arm',
+						MIPS: 'mips',
+						MIPS64: 'mips64',
+						X86_32: 'x86-32',
+						X86_64: 'x86-64'
+					},
+					PlatformNaclArch: {
+						ARM: 'arm',
+						MIPS: 'mips',
+						MIPS64: 'mips64',
+						X86_32: 'x86-32',
+						X86_64: 'x86-64'
+					},
+					RequestUpdateCheckStatus: {
+						NO_UPDATE: 'no_update',
+						THROTTLED: 'throttled',
+						UPDATE_AVAILABLE: 'update_available'
+					},
+					OnInstalledReason: {
+						CHROME_UPDATE: 'chrome_update',
+						INSTALL: 'install',
+						SHARED_MODULE_UPDATE: 'shared_module_update',
+						UPDATE: 'update'
+					},
+					OnRestartRequiredReason: {
+						APP_UPDATE: 'app_update',
+						OS_UPDATE: 'os_update',
+						PERIODIC: 'periodic',
+					}
+				}
+			window.navigator.permissions.query = params => ((params.name === 'notifications') ? Promise.resolve({ state: Notification.permission }) : window.navigator.permissions.query(params));
+			Object.defineProperties(navigator.connection, {
+				rtt: { get: () => 200 },
+				type: { get: () => 'wifi' },
+			});
+			try {
+				if (!((navigator.plugins instanceof PluginArray) && (navigator.plugins.length > 0))) {
+					const mockedFns = []
+					const fakeData = {
+						mimeTypes: [{
+							type: 'application/pdf', suffixes: 'pdf', description: '', __pluginName: 'Chrome PDF Viewer'
+						}, {
+							type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format', __pluginName: 'Chrome PDF Plugin'
+						}, {
+							type: 'application/x-nacl', suffixes: '', description: 'Native Client Executable', enabledPlugin: Plugin, __pluginName: 'Native Client'
+
+						}],
+						plugins: [{
+							name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'
+						}, {
+							name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''
+						}, {
+							name: 'Native Client', filename: 'internal-nacl-plugin', description: ''
+						}],
+						fns: {
+							namedItem: instanceName => {
+								const fn = function (name) {
+									if (!arguments.length)
+										throw new TypeError(`Failed to execute 'namedItem' on '${instanceName}': 1 argument required, but only 0 present.`);
+									return this[name] || null;
+								}
+								mockedFns.push({ ref: fn, name: 'namedItem' });
+								return fn;
+							},
+							item: instanceName => {
+								const fn = function (index) {
+									if (!arguments.length)
+										throw new TypeError(`Failed to execute 'namedItem' on '${instanceName}': 1 argument required, but only 0 present.`);
+									return this[index] || null;
+								}
+								mockedFns.push({ ref: fn, name: 'item' });
+								return fn;
+							},
+							refresh: instanceName => {
+								const fn = function () {
+									return undefined;
+								}
+								mockedFns.push({ ref: fn, name: 'refresh' });
+								return fn;
+							}
+						}
+					}
+					const getSubset = (keys, obj) => keys.reduce((a, c) => ({ ...a, [c]: obj[c] }), {});
+					function generateMimeTypeArray () {
+						const arr = fakeData.mimeTypes.map(obj => getSubset(['type', 'suffixes', 'description'], obj)).map(obj => Object.setPrototypeOf(obj, MimeType.prototype));
+						arr.forEach(obj => (arr[obj.type] = obj));
+						arr.namedItem = fakeData.fns.namedItem('MimeTypeArray');
+						arr.item = fakeData.fns.item('MimeTypeArray');
+						return Object.setPrototypeOf(arr, MimeTypeArray.prototype);
+					}
+					const mimeTypeArray = generateMimeTypeArray();
+					Object.defineProperty(navigator, 'mimeTypes', {
+						get: () => mimeTypeArray
+					});
+					function generatePluginArray () {
+						const arr = fakeData.plugins.map(obj => getSubset(['name', 'filename', 'description'], obj)).map(obj => {
+							const mimes = fakeData.mimeTypes.filter(m => (m.__pluginName === obj.name));
+							mimes.forEach((mime, index) => {
+								navigator.mimeTypes[mime.type].enabledPlugin = obj;
+								obj[mime.type] = navigator.mimeTypes[mime.type];
+								obj[index] = navigator.mimeTypes[mime.type];
+							});
+							obj.length = mimes.length;
+							return obj;
+						}).map(obj => {
+							obj.namedItem = fakeData.fns.namedItem('Plugin');
+							obj.item = fakeData.fns.item('Plugin');
+							return obj;
+						}).map(obj => Object.setPrototypeOf(obj, Plugin.prototype));
+						arr.forEach(obj => (arr[obj.name] = obj));
+						arr.namedItem = fakeData.fns.namedItem('PluginArray');
+						arr.item = fakeData.fns.item('PluginArray');
+						arr.refresh = fakeData.fns.refresh('PluginArray');
+						return Object.setPrototypeOf(arr, PluginArray.prototype);
+					}
+					const pluginArray = generatePluginArray();
+					Object.defineProperty(navigator, 'plugins', {
+						get: () => pluginArray
+					});
+					((fns = []) => {
+						const oldCall = Function.prototype.call;
+						function call () {
+							return oldCall.apply(this, arguments);
+						}
+						Function.prototype.call = call;
+						const nativeToStringFunctionString = Error.toString().replace(/Error/g, 'toString');
+						const oldToString = Function.prototype.toString;
+						function functionToString () {
+							for (const fn of fns) {
+								if (this === fn.ref)
+									return `function ${fn.name}() { [native code] }`;
+							}
+							return ((this === functionToString) ? nativeToStringFunctionString : oldCall.call(oldToString, this));
+						}
+						Function.prototype.toString = functionToString;
+					})(mockedFns);
+				}
+			} catch (err) {}
+			/*
+			if (navigator.plugins.length === 0)
+				Object.defineProperty(navigator, 'plugins', {
+					get: () => [1, 2, 3, 4, 5]
+				});
+			Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+				get: function() {
+					return Object.assign({}, window);
+				}
+			});
+			Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+				get: function() {
+					return window;
+				}
+			});
+			*/
+			var prevX = 0,
+				prevY = 0;
+			Object.defineProperties(MouseEvent.prototype, {
+				movementX: {
+					get: function() {
+						var movementX = (prevX ? this.screenX - prevX : 0);
+						prevX = this.screenX;
+						return movementX;
+					}
+				},
+				movementY: {
+					get: function() {
+						var movementY = (prevY ? this.screenY - prevY : 0);
+						prevY = this.screenY;
+						return movementY;
+					}
+				}
+			});
 			/*
 			Element.prototype.documentOffsetTop = function() {
 				return this.offsetTop + (this.offsetParent ? this.offsetParent.documentOffsetTop() : 0);
 			};
 			*/
-			delete navigator.__proto__.webdriver
+			delete navigator.__proto__.webdriver;
 		}, opt), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
 			username: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[0],
 			password: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[1]
