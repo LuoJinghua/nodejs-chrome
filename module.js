@@ -1,51 +1,12 @@
-/*
-// EXAMPLE 1
-chrome.Proxy = require('proxy-chain');
-chrome.Proxy.port = '8000';
-await (tab = await (browser = await require('nodejs-chrome')()).tabnew());
-await tab.setProxy('http://200.255.122.170:8080');
-await tab.setUrl('http://example.com');
-console.log(await tab.eval(_ => {
-	return (new Function(..._.toObject))(document.querySelector('video'));
-}));
-await tab.exit();
-await browser.exit();
-// EXAMPLE 2
-require('nodejs-chrome')().then(browser => {
-	browser.tabnew().then(tab => {
-		tab.setUrl('http://ifconfig.io/ip').then(res => res.text()).then(text => {
-			tab.exit().then(() => browser.exit().then(() => console.log(text.trim())));
-		});
-	});
-});
-// EXAMPLE 3
-var browser = await chrome({
-	headless: true,
-	proxy: 'http://91.82.42.2:43881'
-});
-var page = await browser.tabnew();
-try {
-	await page.setDevice({
-		"name": "Mobile | Pixel 2",
-		"userAgent": "Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD3.170816.012) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3765.0 Mobile Safari/537.36",
-		"viewport": {
-			"width": 411, "height": 731, "deviceScaleFactor": 2.625, "isMobile": true, "hasTouch": false, "isLandscape": false
-		}
-	});
-	await page.setProxy('http://91.82.42.2:43881');
-	await page.setUrl('https://ifconfig.io/all.json');
-	console.log(JSON.parse(await page.$eval('body', el => el.innerText)).ip == '91.82.42.2');
-} catch (e) {
-	console.error(e);
-}
-return browser.exit();
-*/
 module.exports = (async (opt={}) => {
 	try {
-		var ws, browser,
+		var ws, browser, _ssh,
+			{ exec, spawn } = require('child_process'),
+			fs = require('fs'),
 			net = require('net'),
 			http = require('http'),
-			exec = require('child_process').exec,
+			https = require('https'),
+			FormData = require('form-data'),
 			lambda = (process.argv[1].match('awslambda') && require('chrome-aws-lambda')),
 			chronos = ((process.env.SUDO_USER || process.env.USER) == 'chronos'),
 			pt = (((process.arch != 'x64') || chronos || lambda) ? 'puppeteer-core' : 'puppeteer'),
@@ -54,7 +15,36 @@ module.exports = (async (opt={}) => {
 	} catch (e) {
 		throw (new Error('npm install'));
 	}
-	opt.args = (opt.args || []).concat(['--no-sandbox', '--disable-plugins']);
+	if (opt.eval) {
+		var form = new FormData();
+		opt.eval = 'const browser = await puppeteer.launch();'+opt.eval.replace(/(?:(?:\/\*(?:[^*]|(?:\*+[^*\/]))*\*+\/)|(?:(?<!\:|\\\|\')\/\/.*))/g, '').trim();
+		form.append('file', opt.eval.replace(/\.json\(\)/g, '.content()').replace(/\.text\(\)/g, '.content()').replace(/\.setUrl\(/g, '.goto(').replace(/browser\.tabnew\(/g, 'browser.newPage(').replace(/browser\.exit\(/g, 'browser.close('), {
+			filename: 'blob',
+			contentType: 'text/javascript'
+		});
+		return new Promise((resolve, reject) => form.pipe(https.request({
+			hostname: 'backend-dot-try-puppeteer.appspot.com',
+			port: 443,
+			path: '/run',
+			method: 'POST',
+			headers: form.getHeaders(),
+		}, res => {
+			var chunks = [];
+			res.on('data', chunk => chunks.push(chunk));
+			res.on('end', async () => {
+				var data = JSON.parse(Buffer.concat(chunks).toString());
+				if (data.errors)
+					return reject(data.errors);
+				if (data.result && (opt.eval.indexOf('.screenshot(') > -1))
+					await new Promise((resolve, reject) => fs.writeFile(JSON.parse(opt.eval.split('.screenshot(')[1].split(')')[0].replace(/(['"])?([a-z0-9A-Z_]+)(['"])?:/g, '"$2": ').replace(/'/g, '"')).path, Buffer.from(data.result.buffer.data), () => resolve()));
+				if (data.log && (opt.eval.indexOf('.json()') > -1))
+					return resolve(JSON.parse(data.log.split('<pre>')[1].split('</pre>')[0].trim()));
+				else
+					return resolve(data.log);
+			});
+		})));
+	}
+	opt.args = (opt.args || []).concat((opt.ssh ? [] : ['--no-sandbox', '--disable-plugins']));
 	if (opt.headless !== false) {
 		opt.env = (opt.env || {});
 		if (opt.timeZone)
@@ -78,14 +68,49 @@ module.exports = (async (opt={}) => {
 			opt.args = opt.args.concat(['--disable-web-security']);
 		}
 	}
-	ws = (await new Promise((resolve, reject) => {
-		http.get('http://localhost:9222/json/version', (res, body='') => {
-			res.on('data', (chunk) => (body += chunk));
-			res.on('end', () => resolve(JSON.parse(body)));
-		}).on('error', err => reject(err));
-	}).then(e => ({
-		browserWSEndpoint: e.webSocketDebuggerUrl
-	})).catch(() => (chronos ? process.exit(console.error('Error: --remote-debugging-port=9222 => /etc/chrome_dev.conf')) : null)));
+	if (opt.ssh) {
+		_ssh = {
+			auth: (module.path || process.cwd()+'/node_modules/nodejs-chrome')+'/Auth.exp',
+			pass: opt.ssh.replace(/^(.*?):(.*?)@(.*?)$/gi, '$2'),
+			host: opt.ssh.replace(/^(.*?):(.*?)@(.*?)$/gi, '$1@$3')
+		}
+		// sudo sshfs -o password_stdin -o allow_other user@192.168.43.189:tmp/ ./ <<< "0000"
+		// sudo sshfs -o password_stdin,allow_other user@192.168.43.189:tmp/ ./ <<< "0000"
+		// sudo sshfs -o allow_other alexsmith2844@192.168.43.189:tmps/ ./
+		// sudo umount ./
+		// ssh -N -R 2020:localhost:22 alexsmith2844@192.168.43.189 -p 22
+		// sudo sshfs -oStrictHostKeyChecking=no -o allow_other -p 2020 alexsmith2844@localhost:/home/alexsmith2844/.sync/test ./
+		if (opt.userDataDir) {
+			_ssh.uid = 'nodejs-chrome_'+new Array(10).join().replace(/(.|$)/g, () => ((Math.random()*36)|0).toString(36)[Math.random()<.5?"toString":"toUpperCase"]());
+			await new Promise((resolve, reject) => exec([
+				'expect', _ssh.auth, _ssh.pass, 'rsync -avu --delete', '"'+opt.userDataDir+'/"', '"'+_ssh.host+':/tmp/'+_ssh.uid+'"'
+			].join(' '), (err, data) => resolve(data.trim())));
+			opt.args.push('--user-data-dir=/tmp/'+_ssh.uid);
+		}
+		ws = {
+			browserWSEndpoint: (await new Promise((resolve, reject) => {
+				(_ssh.process = spawn('expect', [
+					_ssh.auth, _ssh.pass, 'ssh', '-t', '-L', '9222:localhost:9222', _ssh.host,
+					'DISPLAY=:0', (opt.timeZone ? 'TZ='+opt.timeZone : ''), '$(which chromium-browser chromium)', '--remote-debugging-port=9222'
+				].concat(opt.args.map(v => (v.match('=') ? v.split('=')[0]+'="'+v.split('=')[1]+'"' : v))))).stdout.on('data', async data => {
+					if (/DevTools listening on /.test((data = data.toString()))) {
+						var _ws = data.split('DevTools listening on ')[1].trim();
+						if (opt.userDataDir)
+							fs.writeFileSync(opt.userDataDir+'/DevToolsActivePort', '9222\n'+_ws.split(':9222')[1]);
+						resolve(_ws);
+					}
+				});
+			}))
+		}
+	}else
+		ws = (opt.ws || (await new Promise((resolve, reject) => {
+			http.get('http://localhost:9222/json/version', (res, body='') => {
+				res.on('data', (chunk) => (body += chunk));
+				res.on('end', () => resolve(JSON.parse(body)));
+			}).on('error', err => reject(err));
+		}).then(e => ({
+			browserWSEndpoint: e.webSocketDebuggerUrl
+		})).catch(() => (chronos ? process.exit(console.error('Error: --remote-debugging-port=9222 => /etc/chrome_dev.conf')) : null))));
 	browser = (await (ws ? puppeteer.connect(Object.assign(ws, opt)) : puppeteer.launch(Object.assign((lambda ? {
 		args: lambda.args.concat((opt.args || [])),
 		executablePath: await lambda.executablePath,
@@ -93,6 +118,8 @@ module.exports = (async (opt={}) => {
 	} : ((process.arch != 'x64') ? {
 		executablePath: await new Promise((resolve, reject) => exec('which chromium-browser chromium', (err, data) => resolve(data.trim())))
 	} : {})), opt))));
+	if (opt.ssh)
+		browser._process = _ssh.process;
 	browser.on('targetcreated', async target => ((target.type() === 'page') && (browser._page = await target.page())));
 	return await (Object.assign(browser, {
 		parent: {
@@ -102,7 +129,7 @@ module.exports = (async (opt={}) => {
 		_page: null,
 		ws: ws,
 		browser: browser,
-		userDataDir: browser._process.spawnargs.filter(v => v.match('--user-data-dir=')).join('').split('=').slice(1, 2).join(),
+		userDataDir: (opt.ssh ? (opt.userDataDir || null) : browser._process && browser._process.spawnargs.filter(v => v.match('--user-data-dir=')).join('').split('=').slice(1, 2).join()),
 		port: browser._connection._url.replace(/^ws:\/\/(?:.*?):(.*?)\/(?:.*?)$/, '$1'),
 		isHeadless: async () => ((await browser.version()).indexOf('HeadlessChrome') == 0),
 		targetTab: (_page, _notnew) => browser.waitForTarget(_target => (_target.opener() === _page.target()), {
@@ -169,7 +196,7 @@ module.exports = (async (opt={}) => {
 				}
 			}).prototype.run();
 		}, false))())),
-		tab: page => Object.assign(page, page.evaluateOnNewDocument(opt => {
+		tab: page => Object.assign(page, (ws ? {} : page.evaluateOnNewDocument(opt => {
 			if (opt.device && opt.device.viewport && opt.device.viewport.isLandscape && window.screen && window.screen.orientation)
 				Object.defineProperty(window.screen.orientation, 'type', {
 					value: 'landscape-primary'
@@ -377,7 +404,7 @@ module.exports = (async (opt={}) => {
 			};
 			*/
 			delete navigator.__proto__.webdriver;
-		}, opt), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
+		}, opt)), (opt.proxy && (opt.proxy.indexOf('@') > -1) && page.authenticate({
 			username: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[0],
 			password: opt.proxy.replace(/^(.*?):\/\/(.*?)@(.*?)$/gi, '$2').split(':')[1]
 		})), {
@@ -442,7 +469,10 @@ module.exports = (async (opt={}) => {
 			tapClick: async (selector, o={}) => {
 				o.selector_ = (selector.match(/->/g) ? selector.replace(/->(?:.*?)(,|$)/g, '$1') : null);
 				try {
-					await page.waitForSelector((o.selector_ || selector));
+					var o_ = {};
+					if (o.timeout)
+						o_.timeout = o.timeout * 1000;
+					await page.waitForSelector((o.selector_ || selector), o_);
 				} catch(e) {
 					return (o.debug ? [] : null);
 				}
@@ -583,6 +613,16 @@ module.exports = (async (opt={}) => {
 			}
 		}),
 		tabnew: () => browser.newPage().then(page => browser.tab(page)),
-		exit: () => browser[(browser._process ? 'close' : 'disconnect')]()
+		exit: () => (opt.ssh ? new Promise((resolve, reject) => {
+			_ssh.process.kill();
+			_ssh.process.stdout.on('end', async () => {
+				if (_ssh.uid)
+					await new Promise((resolve, reject) => exec([
+						'expect', _ssh.auth, _ssh.pass, 'rsync -avu --delete', '"'+_ssh.host+':/tmp/'+_ssh.uid+'/"', '"'+opt.userDataDir+'"', '&&',
+						'expect', _ssh.auth, _ssh.pass, 'ssh', _ssh.host, '"rm -rf /tmp/'+_ssh.uid+'/"'
+					].join(' '), (err, data) => resolve(data.trim())));
+				resolve((_ssh = null));
+			});
+		}) : browser[(browser._process ? 'close' : 'disconnect')]())
 	}));
 });
