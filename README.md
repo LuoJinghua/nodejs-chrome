@@ -3,6 +3,7 @@
 [![Version](https://img.shields.io/npm/v/nodejs-chrome.svg)](https://www.npmjs.org/package/nodejs-chrome)
 
 Пример
+---
 Example
 ```javascript
 var chrome = require('nodejs-chrome');
@@ -46,11 +47,13 @@ if (await browser.isHeadless())
 	browser.exit();
 ```
 Список устройств
+---
 Device list
 ```javascript
 chrome().then(browser => browser.exit().then(() => console.log(browser.parent.module.devices)));
 ```
 Подмена гео положения
+---
 Replacement of geo position
 ```javascript
 var browser = await chrome();
@@ -65,6 +68,7 @@ try {
 browser.exit();
 ```
 Запуск браузера через ssh
+---
 Launching a browser through ssh
 ```javascript
 var browser = await chrome({
@@ -80,6 +84,7 @@ try {
 await browser.exit();
 ```
 Быстрый результат без запуска браузера
+---
 Fast result without launching the browser
 ```javascript
 console.log(
